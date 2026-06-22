@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 
 # Base directories
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = BASE_DIR / "data"
+DATA_DIR = BASE_DIR / ".data"
 PDF_DIR = DATA_DIR / "pdfs"
 AUDIO_DIR = DATA_DIR / "audio"
 DB_DIR = DATA_DIR / "vector_db"
