@@ -87,18 +87,40 @@ def test_compliance_guard():
 
 
 def test_auq_manager():
-    """Verify AUQ manager flags low OCR confidence or failing compliance."""
-    portfolio = allocate_assets(100000.0, "Balanced", "Moderate")
+    """Verify AUQ manager flags low OCR confidence, data conflicts, and escalates to human override."""
+    from backend.services.portfolio_allocator import PortfolioAllocationItem, DraftPortfolio
+
+    # Clean portfolio holding only clean funds (B-THAIESG contains only clean SCC and CPALL)
+    clean_portfolio = DraftPortfolio(
+        allocations=[
+            PortfolioAllocationItem(
+                fund_code="B-THAIESG",
+                fund_name="Bualuang Thai ESG Balanced Fund",
+                esg_rating="AAA",
+                risk_level=5,
+                asset_class="Mixed",
+                weight=1.0,
+                amount=100000.0,
+                units=8695.6
+            )
+        ],
+        total_allocated=100000.0,
+        average_risk_level=5.0,
+        average_esg_rating="AAA",
+        financial_goal="Balanced",
+        risk_profile="Moderate"
+    )
     
-    # 1. High confidence case
+    # 1. High confidence case (no conflicts, verified OCR)
     report_high = evaluate_system_confidence(
         ocr_confidence=1.0,
         user_profile_complete=True,
         compliance_passed=True,
-        portfolio=portfolio
+        portfolio=clean_portfolio
     )
     assert report_high.confidence_score >= 90.0
     assert report_high.uncertainty_rating == "LOW"
+    assert report_high.status == "APPROVED"
     assert report_high.requires_override is False
 
     # 2. Low confidence case due to low OCR quality
@@ -106,11 +128,45 @@ def test_auq_manager():
         ocr_confidence=0.60,
         user_profile_complete=True,
         compliance_passed=True,
-        portfolio=portfolio
+        portfolio=clean_portfolio
     )
     assert report_low_ocr.confidence_score < 85.0
-    assert report_low_ocr.uncertainty_rating in ["MEDIUM", "HIGH"]
     assert report_low_ocr.requires_override is True
+    assert report_low_ocr.aleatoric_uncertainty_score > 0.0
+
+    # 3. Escalated case due to greenwashing and governance conflicts (holding EA via SCBTHAIESG)
+    conflict_portfolio = DraftPortfolio(
+        allocations=[
+            PortfolioAllocationItem(
+                fund_code="SCBTHAIESG",
+                fund_name="SCB Thai ESG Equities Dividend Fund",
+                esg_rating="AA",
+                risk_level=6,
+                asset_class="Equity",
+                weight=1.0,
+                amount=100000.0,
+                units=9881.4
+            )
+        ],
+        total_allocated=100000.0,
+        average_risk_level=6.0,
+        average_esg_rating="AA",
+        financial_goal="Dividend",
+        risk_profile="Moderate"
+    )
+    
+    report_conflict = evaluate_system_confidence(
+        ocr_confidence=1.0,
+        user_profile_complete=True,
+        compliance_passed=True,
+        portfolio=conflict_portfolio
+    )
+    assert report_conflict.uncertainty_rating == "HIGH"
+    assert report_conflict.status == "ESCALATED"
+    assert report_conflict.requires_override is True
+    assert len(report_conflict.xai_justifications) > 0
+    assert any("GREENWASHING" in j or "CGR" in j for j in report_conflict.xai_justifications)
+    assert any("Temporary Pause" in step for step in report_conflict.structured_reasoning_trace)
 
 
 def test_orchestration_endpoint_and_healing_loop():

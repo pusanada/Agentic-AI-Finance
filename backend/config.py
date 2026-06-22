@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     typhoon_model_vision: str = Field(default="typhoon-v1.5-vision-instruct")
     typhoon_model_text: str = Field(default="typhoon-v1.5-instruct")
     chroma_db_dir: str = Field(default="./chroma_db")
+    esg_analyst_api_url: str = Field(default="http://localhost:8001")
     
     # Allow loading from environment variables or .env file
     model_config = SettingsConfigDict(

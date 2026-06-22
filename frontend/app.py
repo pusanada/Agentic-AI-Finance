@@ -123,6 +123,47 @@ custom_css = """
         color: #64748b;
         margin-top: 4px;
     }
+    
+    /* AUQ Supervisor Status Badge styles */
+    @keyframes pulse-yellow {
+        0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+        70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+    }
+    @keyframes flash-red {
+        0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); border-color: rgba(239, 68, 68, 0.7); }
+        50% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); border-color: rgba(239, 68, 68, 0.3); }
+        100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); border-color: rgba(239, 68, 68, 0.7); }
+    }
+    .status-approved {
+        background: rgba(16, 185, 129, 0.12);
+        border: 1px solid #10b981;
+        color: #34d399;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-weight: bold;
+        display: inline-block;
+    }
+    .status-pause {
+        background: rgba(245, 158, 11, 0.12);
+        border: 1px solid #f59e0b;
+        color: #fbbf24;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-weight: bold;
+        display: inline-block;
+        animation: pulse-yellow 2s infinite;
+    }
+    .status-escalated {
+        background: rgba(239, 68, 68, 0.15);
+        border: 1px solid #ef4444;
+        color: #fca5a5;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-weight: bold;
+        display: inline-block;
+        animation: flash-red 1.5s infinite;
+    }
 </style>
 """
 st.markdown(custom_css, unsafe_allow_html=True)
@@ -211,7 +252,7 @@ with tab1:
         
         # Scan e:\AI-Finance\.test_pdf directory for extra files if present
         demo_files = ["None"]
-        test_pdf_dir = "e:\\AI-finance2_port\\.test_pdf"
+        test_pdf_dir = "e:\\AI-finance\\AI-finance_Supervisor\\.test_pdf"
         if os.path.exists(test_pdf_dir):
             try:
                 extra_files = sorted([os.path.join(".test_pdf", f) for f in os.listdir(test_pdf_dir) if f.endswith(".pdf")])
@@ -241,7 +282,7 @@ with tab1:
                 st.image(uploaded_file, caption="Uploaded Document Preview", use_column_width=True)
         elif demo_option != "None":
             # Load demo file from workspace
-            demo_path = os.path.join("e:\\AI-finance2_port", demo_option)
+            demo_path = os.path.join("e:\\AI-finance\\AI-finance_Supervisor", demo_option)
             if os.path.exists(demo_path):
                 with open(demo_path, "rb") as f:
                     selected_file_bytes = f.read()
@@ -481,16 +522,28 @@ with tab2:
                 "ocr_confidence": ocr_confidence
             }
             
-            with st.spinner("Orchestrating Allocation & Compliance checks..."):
-                try:
+            status_placeholder = st.empty()
+            try:
+                with status_placeholder.container():
+                    st.info("🧠 Allocator Agent: Constructing initial asset weights...")
+                    import time
+                    time.sleep(0.6)
+                    st.info("🛡️ Compliance Guard Agent: Running suitability and tax safeguards...")
+                    time.sleep(0.6)
+                    st.info("📡 AUQ Supervisor: Fact-checking corporate disclosures & Opportunity Day statements...")
+                    time.sleep(0.6)
+                status_placeholder.empty()
+                
+                with st.spinner("Finalizing order parameters..."):
                     response = requests.post(f"{BACKEND_URL}/api/v1/portfolio/allocate", json=payload)
                     if response.status_code == 200:
                         st.session_state.allocation_results = response.json()
                         st.success("Portfolio generated and compliance verified!")
                     else:
                         st.error(f"Allocation failed: {response.text}")
-                except Exception as e:
-                    st.error(f"Could not connect to backend: {str(e)}")
+            except Exception as e:
+                status_placeholder.empty()
+                st.error(f"Could not connect to backend: {str(e)}")
                     
     with col_b:
         st.markdown("#### 2. Allocation & Safeguards Audit")
@@ -576,15 +629,41 @@ with tab2:
                 
             # AUQ Manager Supervision Panel
             st.markdown("##### 🛡️ AUQ Supervisor Oversight")
+            
+            # Status badge
+            status = auq.get("status", "APPROVED")
+            if status == "APPROVED":
+                status_html = "<div class='status-approved' style='margin-bottom: 15px; width: 100%; text-align: center;'>🟢 STATUS: APPROVED FOR DIRECT EXECUTION</div>"
+            elif status == "TEMPORARY_PAUSE":
+                status_html = "<div class='status-pause' style='margin-bottom: 15px; width: 100%; text-align: center;'>⚠️ STATUS: TEMPORARY PAUSE (RESOLVING AMBIGUITY)</div>"
+            else:
+                status_html = "<div class='status-escalated' style='margin-bottom: 15px; width: 100%; text-align: center;'>🚨 STATUS: ESCALATED TO CFA/FUND MANAGER</div>"
+                
+            st.markdown(status_html, unsafe_allow_html=True)
+            
             auq_color = "#10b981" if auq["uncertainty_rating"] == "LOW" else ("#f59e0b" if auq["uncertainty_rating"] == "MEDIUM" else "#ef4444")
             
             col_auq1, col_auq2 = st.columns([1, 2])
             with col_auq1:
                 st.markdown(f"""
-                <div class='premium-card' style='text-align: center; padding: 18px;'>
+                <div class='premium-card' style='text-align: center; padding: 18px; margin-bottom: 10px;'>
                     <div style='font-size: 0.8rem; color: #94a3b8; font-weight: 600; text-transform: uppercase;'>System Confidence</div>
                     <div style='font-size: 2.4rem; font-weight: 800; color: {auq_color}; margin: 5px 0;'>{auq['confidence_score']}%</div>
                     <div style='font-size: 0.9rem; font-weight: 600; color: {auq_color}; text-transform: uppercase;'>{auq['uncertainty_rating']} UNCERTAINTY</div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Uncertainty Splits
+                st.markdown(f"""
+                <div style='display: flex; gap: 8px; margin-bottom: 10px;'>
+                    <div class='premium-card' style='flex: 1; text-align: center; padding: 8px; margin-bottom: 0;'>
+                        <div class='metric-label' style='font-size: 0.6rem;'>Epistemic</div>
+                        <div style='font-size: 1.1rem; font-weight: 800; color: #f87171;'>-{auq.get('epistemic_uncertainty_score', 0.0):.1f}%</div>
+                    </div>
+                    <div class='premium-card' style='flex: 1; text-align: center; padding: 8px; margin-bottom: 0;'>
+                        <div class='metric-label' style='font-size: 0.6rem;'>Aleatoric</div>
+                        <div style='font-size: 1.1rem; font-weight: 800; color: #fbbf24;'>-{auq.get('aleatoric_uncertainty_score', 0.0):.1f}%</div>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
             with col_auq2:
@@ -592,6 +671,26 @@ with tab2:
                 st.markdown("**Confidence Audit Factors:**")
                 for reason in auq["reasons"]:
                     st.markdown(f"• {reason}")
+            
+            # Explainable AI (XAI) Justifications
+            xai_list = auq.get("xai_justifications", [])
+            if xai_list:
+                st.markdown("<br>##### ⚠️ Explainable AI (XAI) Risk Disclosures", unsafe_allow_html=True)
+                for justification in xai_list:
+                    formatted_just = justification.replace('\n', '<br>')
+                    st.markdown(f"""
+                    <div style='border-left: 4px solid #ef4444; background: rgba(239, 68, 68, 0.08); padding: 14px; margin-bottom: 10px; border-radius: 4px; font-size: 0.9rem; line-height: 1.5;'>
+                        {formatted_just}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+            # Structured Reasoning Trace Expander
+            trace_list = auq.get("structured_reasoning_trace", [])
+            if trace_list:
+                st.markdown("<br>", unsafe_allow_html=True)
+                with st.expander("🧠 View Agentic Brain (Structured Reasoning Trace)"):
+                    for step in trace_list:
+                        st.code(step, language="bash")
             
             # Show Execution Trace expander
             with st.expander("🛠️ View Agent Orchestration Log (Compliance Loop Trace)"):
@@ -615,7 +714,7 @@ with tab2:
             if st.session_state.execution_confirmed:
                 st.success("🎉 Trade orders generated and routed to compliance registry! Allocation locked.")
                 st.markdown(f"""
-                <div class='premium-card' style='border-left: 5px solid #10b981; background: rgba(16, 185, 129, 0.05);'>
+                <div class='premium-card' style='border-left: 5px solid #10b981; background: rgba(16, 185, 129, 0.05); padding: 18px;'>
                     <strong>Executed Trade Orders:</strong><br>
                     • Total Purchase Amount: ฿{portfolio['total_allocated']:,.2f}<br>
                     • Tax Exemption Claim: 2569 Tax Year<br>

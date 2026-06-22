@@ -1,7 +1,8 @@
+import uuid
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from backend.config import settings
 from backend.services.tax_calculator import (
@@ -15,7 +16,8 @@ from backend.services.vector_service import query_tax_regulations, answer_tax_qu
 # Import new Portfolio Allocator agent components
 from backend.services.portfolio_allocator import allocate_assets, DraftPortfolio
 from backend.services.compliance_guard import check_portfolio_compliance, ComplianceReport
-from backend.services.auq_manager import evaluate_system_confidence, AUQReport
+from backend.services.auq_manager import evaluate_system_confidence, evaluate_system_confidence_from_state, AUQReport
+from backend.services.state_manager import state_manager
 
 app = FastAPI(
     title="ThaiESG Portfolio Allocator & Compliance Guard API",
@@ -48,6 +50,7 @@ class PortfolioAllocateRequest(BaseModel):
     risk_profile: str = Field(..., description="Risk profile (Conservative, Moderate, Aggressive)")
     user_instructions: str = Field(default="", description="Any custom fund/stock constraints")
     ocr_confidence: float = Field(default=1.0, description="Confidence score from the OCR step")
+    session_id: Optional[str] = Field(default=None, description="Optional active session ID")
 
 class PortfolioAllocateResponse(BaseModel):
     quota: TaxCalculatorResponse
@@ -55,18 +58,21 @@ class PortfolioAllocateResponse(BaseModel):
     compliance: ComplianceReport
     auq: AUQReport
     execution_trace: List[str]
+    session_id: str
 
 class GenericPortfolioAllocateRequest(BaseModel):
     investment_budget: float = Field(..., ge=0, description="Direct investment budget in THB")
     financial_goal: str = Field(..., description="Investment goal (Growth, Dividend, Balanced)")
     risk_profile: str = Field(..., description="Risk profile (Conservative, Moderate, Aggressive)")
     user_instructions: str = Field(default="", description="Any custom fund/stock constraints")
+    session_id: Optional[str] = Field(default=None, description="Optional active session ID")
 
 class GenericPortfolioAllocateResponse(BaseModel):
     portfolio: DraftPortfolio
     compliance: ComplianceReport
     auq: AUQReport
     execution_trace: List[str]
+    session_id: str
 
 @app.get("/")
 def read_root():
@@ -140,8 +146,23 @@ def allocate_portfolio(request: PortfolioAllocateRequest):
     5. AUQ Manager: Audits uncertainty and risk, outputting system confidence metrics.
     """
     trace = []
+    sess_id = request.session_id or f"session-{uuid.uuid4().hex[:8]}"
     
     try:
+        # Step 0: Save OCR State to state_manager first
+        ocr_data = {
+            "assessable_income": request.assessable_income,
+            "already_purchased": request.already_purchased,
+            "document_type": "50 Tawi (books / forms)",
+            "confidence": request.ocr_confidence
+        }
+        state_manager.update_ocr(
+            session_id=sess_id,
+            ocr_result=ocr_data,
+            confidence=request.ocr_confidence,
+            uncertainty_factors=[] if request.ocr_confidence >= 0.99 else ["Low OCR Extraction Confidence"]
+        )
+
         # Step 1: Calculate Quota (Demand)
         quota_req = TaxCalculatorRequest(
             assessable_income=request.assessable_income,
@@ -152,7 +173,6 @@ def allocate_portfolio(request: PortfolioAllocateRequest):
         trace.append(f"Demand Quota: Calculated remaining space as ฿{remaining:,.2f} (Max quota: ฿{quota_res.max_quota:,.2f})")
         
         if remaining <= 0:
-            # Create a zero allocation portfolio safely
             remaining = 0.0
             trace.append("Warning: Remaining quota is zero. Generating empty draft portfolio.")
 
@@ -176,13 +196,34 @@ def allocate_portfolio(request: PortfolioAllocateRequest):
                 user_instructions=current_instructions
             )
             
-            # Check Compliance
+            # Store Draft Portfolio in State Manager first
+            state_manager.update_portfolio(
+                session_id=sess_id,
+                portfolio=portfolio.model_dump(),
+                confidence=0.95,
+                uncertainty_factors=[]
+            )
+            
+            # Pre-fetch ESG data for all underlying stocks in Allocator
+            from backend.services.jump_db import get_fund_underlying_holdings
+            from backend.services.esg_client import esg_client
+            for item in portfolio.allocations:
+                holdings = get_fund_underlying_holdings(item.fund_code)
+                if holdings:
+                    for h in holdings:
+                        ticker = h.get("ticker")
+                        esg_client.get_esg_report(ticker, session_id=sess_id)
+                else:
+                    esg_client.get_esg_report(item.fund_code, session_id=sess_id)
+            
+            # Check Compliance (will load from State Manager and update it)
             compliance = check_portfolio_compliance(
                 portfolio=portfolio,
                 assessable_income=request.assessable_income,
                 already_purchased=request.already_purchased,
                 max_quota=quota_res.max_quota,
-                client_risk_profile=request.risk_profile  # Validate against client's KYC profile
+                client_risk_profile=request.risk_profile,
+                session_id=sess_id
             )
             
             if compliance.is_compliant:
@@ -201,15 +242,8 @@ def allocate_portfolio(request: PortfolioAllocateRequest):
                     trace.append("Self-Healing Action: Applying standard correction caps.")
                     break
         
-        # Step 3: AUQ Supervisor Evaluation
-        user_profile_complete = bool(request.financial_goal and request.risk_profile)
-        auq_res = evaluate_system_confidence(
-            ocr_confidence=request.ocr_confidence,
-            user_profile_complete=user_profile_complete,
-            compliance_passed=compliance.is_compliant,
-            portfolio=portfolio,
-            has_custom_instructions=bool(request.user_instructions)
-        )
+        # Step 3: AUQ Supervisor Evaluation from State Manager (Consumes all confidence scores)
+        auq_res = evaluate_system_confidence_from_state(sess_id)
         trace.append(f"AUQ Supervisor: Confidence computed as {auq_res.confidence_score}% (Rating: {auq_res.uncertainty_rating})")
         
         return PortfolioAllocateResponse(
@@ -217,7 +251,8 @@ def allocate_portfolio(request: PortfolioAllocateRequest):
             portfolio=portfolio,
             compliance=compliance,
             auq=auq_res,
-            execution_trace=trace
+            execution_trace=trace,
+            session_id=sess_id
         )
         
     except Exception as e:
@@ -236,8 +271,23 @@ def allocate_generic_portfolio(request: GenericPortfolioAllocateRequest):
     4. AUQ Manager: Audits uncertainty and risk, outputting system confidence metrics.
     """
     trace = []
+    sess_id = request.session_id or f"session-{uuid.uuid4().hex[:8]}"
     
     try:
+        # Step 0: Save mock OCR / placeholder State to state_manager first
+        ocr_data = {
+            "assessable_income": 0.0,
+            "already_purchased": 0.0,
+            "document_type": "No OCR (Generic Budget Request)",
+            "confidence": 1.0
+        }
+        state_manager.update_ocr(
+            session_id=sess_id,
+            ocr_result=ocr_data,
+            confidence=1.0,
+            uncertainty_factors=[]
+        )
+
         budget = request.investment_budget
         trace.append(f"Direct Budget: Received investment budget as ฿{budget:,.2f}")
         
@@ -265,11 +315,32 @@ def allocate_generic_portfolio(request: GenericPortfolioAllocateRequest):
                 user_instructions=current_instructions
             )
             
+            # Store Draft Portfolio in State Manager first
+            state_manager.update_portfolio(
+                session_id=sess_id,
+                portfolio=portfolio.model_dump(),
+                confidence=0.95,
+                uncertainty_factors=[]
+            )
+            
+            # Pre-fetch ESG data for all underlying stocks in Allocator
+            from backend.services.jump_db import get_fund_underlying_holdings
+            from backend.services.esg_client import esg_client
+            for item in portfolio.allocations:
+                holdings = get_fund_underlying_holdings(item.fund_code)
+                if holdings:
+                    for h in holdings:
+                        ticker = h.get("ticker")
+                        esg_client.get_esg_report(ticker, session_id=sess_id)
+                else:
+                    esg_client.get_esg_report(item.fund_code, session_id=sess_id)
+            
             # Check Compliance (ignoring tax quota calculations)
             compliance = check_portfolio_compliance(
                 portfolio=portfolio,
-                client_risk_profile=request.risk_profile,  # Validate against client's KYC profile
-                skip_tax_rules=True
+                client_risk_profile=request.risk_profile,
+                skip_tax_rules=True,
+                session_id=sess_id
             )
             
             if compliance.is_compliant:
@@ -286,22 +357,16 @@ def allocate_generic_portfolio(request: GenericPortfolioAllocateRequest):
                     trace.append("Self-Healing Action: Applying standard correction caps.")
                     break
         
-        # Step 3: AUQ Supervisor Evaluation
-        user_profile_complete = bool(request.financial_goal and request.risk_profile)
-        auq_res = evaluate_system_confidence(
-            ocr_confidence=1.0,  # Fixed to 1.0 since no OCR document is scanned
-            user_profile_complete=user_profile_complete,
-            compliance_passed=compliance.is_compliant,
-            portfolio=portfolio,
-            has_custom_instructions=bool(request.user_instructions)
-        )
+        # Step 3: AUQ Supervisor Evaluation from State Manager (Consumes all confidence scores)
+        auq_res = evaluate_system_confidence_from_state(sess_id)
         trace.append(f"AUQ Supervisor: Confidence computed as {auq_res.confidence_score}% (Rating: {auq_res.uncertainty_rating})")
         
         return GenericPortfolioAllocateResponse(
             portfolio=portfolio,
             compliance=compliance,
             auq=auq_res,
-            execution_trace=trace
+            execution_trace=trace,
+            session_id=sess_id
         )
         
     except Exception as e:
@@ -313,4 +378,3 @@ def allocate_generic_portfolio(request: GenericPortfolioAllocateRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
-

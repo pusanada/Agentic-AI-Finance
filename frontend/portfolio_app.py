@@ -140,6 +140,47 @@ custom_css = """
         text-align: center;
         margin-bottom: 10px;
     }
+    
+    /* AUQ Supervisor Status Badge styles */
+    @keyframes pulse-yellow {
+        0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+        70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+    }
+    @keyframes flash-red {
+        0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); border-color: rgba(239, 68, 68, 0.7); }
+        50% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); border-color: rgba(239, 68, 68, 0.3); }
+        100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); border-color: rgba(239, 68, 68, 0.7); }
+    }
+    .status-approved {
+        background: rgba(16, 185, 129, 0.12);
+        border: 1px solid #10b981;
+        color: #34d399;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-weight: bold;
+        display: inline-block;
+    }
+    .status-pause {
+        background: rgba(245, 158, 11, 0.12);
+        border: 1px solid #f59e0b;
+        color: #fbbf24;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-weight: bold;
+        display: inline-block;
+        animation: pulse-yellow 2s infinite;
+    }
+    .status-escalated {
+        background: rgba(239, 68, 68, 0.15);
+        border: 1px solid #ef4444;
+        color: #fca5a5;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-weight: bold;
+        display: inline-block;
+        animation: flash-red 1.5s infinite;
+    }
 </style>
 """
 st.markdown(custom_css, unsafe_allow_html=True)
@@ -219,16 +260,28 @@ with st.sidebar:
             "user_instructions": custom_instructions
         }
         
-        with st.spinner("Orchestrating Allocation & Compliance loops..."):
-            try:
+        status_placeholder = st.empty()
+        try:
+            with status_placeholder.container():
+                st.info("🧠 Allocator Agent: Constructing initial asset weights...")
+                import time
+                time.sleep(0.6)
+                st.info("🛡️ Compliance Guard Agent: Running suitability and tax safeguards...")
+                time.sleep(0.6)
+                st.info("📡 AUQ Supervisor: Fact-checking corporate disclosures & Opportunity Day statements...")
+                time.sleep(0.6)
+            status_placeholder.empty()
+            
+            with st.spinner("Finalizing order parameters..."):
                 response = requests.post(f"{BACKEND_URL}/api/v1/portfolio/allocate_generic", json=payload)
                 if response.status_code == 200:
                     st.session_state.allocation_results = response.json()
                     st.success("Allocation generated successfully!")
                 else:
                     st.error(f"Allocation request failed: {response.text}")
-            except Exception as e:
-                st.error(f"Could not connect to backend: {str(e)}")
+        except Exception as e:
+            status_placeholder.empty()
+            st.error(f"Could not connect to backend: {str(e)}")
 
 # Tabs Layout
 tab1, tab2 = st.tabs(["📊 Portfolio Dashboard", "💬 Portfolio Q&A Assistant"])
@@ -344,14 +397,39 @@ with tab1:
         with col_r:
             st.markdown("### 📡 AUQ Supervisor Oversight")
             
+            # Status badge
+            status = auq.get("status", "APPROVED")
+            if status == "APPROVED":
+                status_html = "<div class='status-approved' style='margin-bottom: 15px; width: 100%; text-align: center;'>🟢 STATUS: APPROVED FOR DIRECT EXECUTION</div>"
+            elif status == "TEMPORARY_PAUSE":
+                status_html = "<div class='status-pause' style='margin-bottom: 15px; width: 100%; text-align: center;'>⚠️ STATUS: TEMPORARY PAUSE (RESOLVING AMBIGUITY)</div>"
+            else:
+                status_html = "<div class='status-escalated' style='margin-bottom: 15px; width: 100%; text-align: center;'>🚨 STATUS: ESCALATED TO CFA/FUND MANAGER</div>"
+                
+            st.markdown(status_html, unsafe_allow_html=True)
+            
             auq_color = "#34d399" if auq["uncertainty_rating"] == "LOW" else ("#fbbf24" if auq["uncertainty_rating"] == "MEDIUM" else "#f87171")
             
             # Confidence Panel
             st.markdown(f"""
-            <div class='premium-card' style='display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px;'>
+            <div class='premium-card' style='display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; margin-bottom: 15px;'>
                 <div class='metric-label' style='text-align: center;'>Confidence Index</div>
                 <div style='font-size: 3rem; font-weight: 900; color: {auq_color}; margin: 8px 0;'>{auq['confidence_score']}%</div>
                 <div style='font-size: 0.95rem; font-weight: 700; color: {auq_color}; text-transform: uppercase;'>{auq['uncertainty_rating']} UNCERTAINTY</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Uncertainty Splits
+            st.markdown(f"""
+            <div style='display: flex; gap: 10px; margin-bottom: 15px;'>
+                <div class='premium-card' style='flex: 1; text-align: center; padding: 12px; margin-bottom: 0;'>
+                    <div class='metric-label' style='font-size: 0.7rem;'>Epistemic Penalty</div>
+                    <div style='font-size: 1.3rem; font-weight: 800; color: #f87171;'>-{auq.get('epistemic_uncertainty_score', 0.0):.1f}%</div>
+                </div>
+                <div class='premium-card' style='flex: 1; text-align: center; padding: 12px; margin-bottom: 0;'>
+                    <div class='metric-label' style='font-size: 0.7rem;'>Aleatoric Penalty</div>
+                    <div style='font-size: 1.3rem; font-weight: 800; color: #fbbf24;'>-{auq.get('aleatoric_uncertainty_score', 0.0):.1f}%</div>
+                </div>
             </div>
             """, unsafe_allow_html=True)
             
@@ -360,12 +438,32 @@ with tab1:
             for reason in auq["reasons"]:
                 st.markdown(f"• {reason}")
                 
+            # Explainable AI (XAI) Justifications
+            xai_list = auq.get("xai_justifications", [])
+            if xai_list:
+                st.markdown("<br>##### ⚠️ Explainable AI (XAI) Risk Disclosures", unsafe_allow_html=True)
+                for justification in xai_list:
+                    formatted_just = justification.replace('\n', '<br>')
+                    st.markdown(f"""
+                    <div style='border-left: 4px solid #ef4444; background: rgba(239, 68, 68, 0.08); padding: 14px; margin-bottom: 10px; border-radius: 4px; font-size: 0.9rem; line-height: 1.5;'>
+                        {formatted_just}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+            # Structured Reasoning Trace Expander
+            trace_list = auq.get("structured_reasoning_trace", [])
+            if trace_list:
+                st.markdown("<br>", unsafe_allow_html=True)
+                with st.expander("🧠 View Agentic Brain (Structured Reasoning Trace)"):
+                    for step in trace_list:
+                        st.code(step, language="bash")
+                
             # Execution Control / Manual Override Switch
             st.markdown("---")
             requires_override = auq["requires_override"]
             
             if requires_override:
-                st.warning("⚠️ High uncertainty / Warning flags are present. An override is required to purchase.")
+                st.warning("🛑 High uncertainty / Warning flags are present. An override is required to purchase.")
                 override_approved = st.checkbox("Approve Manual Decision Override (HITL Registry Override)")
                 
                 # Execute purchase

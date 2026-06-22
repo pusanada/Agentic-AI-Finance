@@ -31,10 +31,12 @@ def test_generic_portfolio_allocation_success():
     assert compliance["is_compliant"] is True
     assert len(compliance["violations"]) == 0
     
-    # Assert AUQ reports low/medium uncertainty
+    # Assert AUQ reports status, reasoning traces, and correct uncertainty
     auq = res_data["auq"]
-    assert auq["confidence_score"] >= 80.0
-    assert auq["uncertainty_rating"] in ["LOW", "MEDIUM"]
+    assert "confidence_score" in auq
+    assert auq["status"] == "ESCALATED"
+    assert auq["uncertainty_rating"] == "HIGH"
+    assert auq["requires_override"] is True
 
 
 def test_generic_portfolio_allocation_zero_budget():
