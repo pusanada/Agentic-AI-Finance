@@ -35,7 +35,7 @@ class SETService:
         with CGR scores and JUMP+ membership data.
         """
         if not settings.SCRAPING_ENABLED:
-            return MOCK_SET_DATABASE
+            return [{**stock, "data_source": "mock"} for stock in MOCK_SET_DATABASE]
 
         # Try cache first
         cached = _cache.get("set_listed_companies")
@@ -73,7 +73,7 @@ class SETService:
             print(f"[SETService] Scraping failed, falling back to mock: {e}")
 
         # Fallback to mock
-        return MOCK_SET_DATABASE
+        return [{**stock, "data_source": "mock"} for stock in MOCK_SET_DATABASE]
 
     @staticmethod
     def get_screened_stocks(min_cgr_score: int = 90) -> List[Dict[str, Any]]:

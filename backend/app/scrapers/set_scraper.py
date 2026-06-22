@@ -56,11 +56,16 @@ class SETScraper:
             )
             response.raise_for_status()
 
-            # Parse XLS with pandas
-            df = pd.read_excel(
-                io.BytesIO(response.content),
-                engine="xlrd"  # For .xls format
-            )
+            # Parse XLS with pandas (try HTML first since SET often returns HTML labeled as .xls)
+            try:
+                dfs = pd.read_html(io.BytesIO(response.content), header=1)
+                df = dfs[0]
+            except Exception as e:
+                print(f"[SETScraper] HTML parsing failed, trying Excel: {e}")
+                df = pd.read_excel(
+                    io.BytesIO(response.content),
+                    engine="xlrd"  # For .xls format
+                )
 
             # Normalize column names (the XLS has varying header names)
             df.columns = [str(c).strip() for c in df.columns]

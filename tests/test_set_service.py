@@ -22,7 +22,7 @@ def test_get_screened_stocks():
 def test_get_stock_by_ticker():
     stock = SETService.get_stock_by_ticker("PTT")
     assert stock is not None
-    assert stock["name"] == "PTT Public Company Limited"
+    assert stock["name"].upper() == "PTT PUBLIC COMPANY LIMITED"
     
     none_stock = SETService.get_stock_by_ticker("NONEXISTENT")
     assert none_stock is None

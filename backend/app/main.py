@@ -44,6 +44,10 @@ def screen_stocks():
     passed_stocks = []
     failed_stocks = []
     
+    data_source = "mock"
+    if all_stocks:
+        data_source = all_stocks[0].get("data_source", "mock")
+    
     for stock in all_stocks:
         result = agent.analyze_ticker(stock["ticker"])
         if result.get("status") == "APPROVED":
@@ -55,7 +59,8 @@ def screen_stocks():
         "passed_count": len(passed_stocks),
         "failed_count": len(failed_stocks),
         "passed": passed_stocks,
-        "failed": failed_stocks
+        "failed": failed_stocks,
+        "data_source": data_source
     }
 
 @app.post("/api/v1/analyze/{ticker}")

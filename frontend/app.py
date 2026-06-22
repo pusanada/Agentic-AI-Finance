@@ -145,6 +145,10 @@ with tab1:
         screen_data = st.session_state.screen_data
         st.success(f"การคัดกรองเสร็จสมบูรณ์! พบหุ้นผ่านเกณฑ์ {screen_data['passed_count']} ตัว และไม่ผ่านเกณฑ์ {screen_data['failed_count']} ตัว")
         
+        # Display Data Source Info
+        source_label = "🌐 ดึงข้อมูลสดจากเว็บไซต์ (Scraped from Web)" if screen_data.get("data_source") == "scraped" else "📦 ดึงข้อมูลจำลองในระบบ (Mock Database)"
+        st.info(f"**แหล่งที่มาของข้อมูล (Data Source):** {source_label}")
+        
         # Columns for showing Passed and Failed lists
         col1, col2 = st.columns(2)
         
