@@ -146,8 +146,10 @@ with tab1:
         st.success(f"การคัดกรองเสร็จสมบูรณ์! พบหุ้นผ่านเกณฑ์ {screen_data['passed_count']} ตัว และไม่ผ่านเกณฑ์ {screen_data['failed_count']} ตัว")
         
         # Display Data Source Info
-        source_label = "🌐 ดึงข้อมูลสดจากเว็บไซต์ (Scraped from Web)" if screen_data.get("data_source") == "scraped" else "📦 ดึงข้อมูลจำลองในระบบ (Mock Database)"
-        st.info(f"**แหล่งที่มาของข้อมูล (Data Source):** {source_label}")
+        if screen_data.get("data_source") == "scraped":
+            st.info("**แหล่งที่มาของข้อมูล (Data Source):** 🌐 ดึงข้อมูลสดจาก [รายชื่อหลักทรัพย์ ตลาดหลักทรัพย์แห่งประเทศไทย (SET)](https://www.set.or.th/th/market/information/securities-list) และ [ข้อมูลการดำเนินการตามกฎหมาย สำนักงาน ก.ล.ต. (SEC)](https://market.sec.or.th/public/idisc/th/ViewMore/enforce-recent)")
+        else:
+            st.info("**แหล่งที่มาของข้อมูล (Data Source):** 📦 ดึงข้อมูลจำลองในระบบ (Mock Database)")
         
         # Columns for showing Passed and Failed lists
         col1, col2 = st.columns(2)
