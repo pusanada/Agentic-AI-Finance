@@ -1,5 +1,10 @@
 import requests
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+
+from app.config import settings
+from app.scrapers.cache import ScraperCache
+from app.scrapers.set_scraper import SETScraper
+from app.scrapers.cgr_scraper import CGRScraper
 
 # Mock database of SET stocks for realistic demo and fallback
 MOCK_SET_DATABASE = [
@@ -17,12 +22,57 @@ MOCK_SET_DATABASE = [
     {"ticker": "STEC", "name": "Sino-Thai Engineering and Construction PLC", "industry": "Property & Construction", "cgr_score": 91, "jump_plus": False, "price": 9.10} # Fails JUMP+
 ]
 
+# Initialize cache
+_cache = ScraperCache(settings.CACHE_DIR, default_ttl_hours=settings.CACHE_TTL_HOURS)
+
+
 class SETService:
     @staticmethod
     def get_all_stocks() -> List[Dict[str, Any]]:
         """
-        Retrieves all stocks from the SET database.
+        Retrieves all stocks. Tries real scraping first, falls back to mock data.
+        When scraping is enabled, downloads the official SET XLS and enriches
+        with CGR scores and JUMP+ membership data.
         """
+        if not settings.SCRAPING_ENABLED:
+            return MOCK_SET_DATABASE
+
+        # Try cache first
+        cached = _cache.get("set_listed_companies")
+        if cached:
+            print("[SETService] Using cached listed companies data.")
+            return cached
+
+        # Try scraping
+        try:
+            scraped = SETScraper.scrape_listed_companies()
+            if scraped:
+                # Enrich with CGR scores
+                enriched = []
+                for company in scraped:
+                    ticker = company["ticker"]
+                    cgr_score = CGRScraper.get_cgr_score(ticker)
+
+                    enriched.append({
+                        "ticker": ticker,
+                        "name": company["name"],
+                        "industry": company.get("industry", ""),
+                        "cgr_score": cgr_score if cgr_score is not None else 0,
+                        "jump_plus": company.get("jump_plus", False),
+                        "price": 0.0,  # Price not available from XLS
+                        "market": company.get("market", "SET"),
+                        "sector": company.get("sector", ""),
+                        "data_source": "scraped"
+                    })
+
+                # Cache the enriched results
+                _cache.set("set_listed_companies", enriched)
+                print(f"[SETService] Scraped and cached {len(enriched)} companies.")
+                return enriched
+        except Exception as e:
+            print(f"[SETService] Scraping failed, falling back to mock: {e}")
+
+        # Fallback to mock
         return MOCK_SET_DATABASE
 
     @staticmethod
@@ -38,12 +88,21 @@ class SETService:
         return screened
 
     @staticmethod
-    def get_stock_by_ticker(ticker: str) -> Dict[str, Any]:
+    def get_stock_by_ticker(ticker: str) -> Optional[Dict[str, Any]]:
         """
         Retrieves a single stock details by its ticker symbol.
+        Searches scraped data first, then falls back to mock.
         """
         ticker_upper = ticker.upper()
+        all_stocks = SETService.get_all_stocks()
+
+        for stock in all_stocks:
+            if stock["ticker"] == ticker_upper:
+                return stock
+
+        # If not found in scraped data, check mock specifically
         for stock in MOCK_SET_DATABASE:
             if stock["ticker"] == ticker_upper:
                 return stock
+
         return None
