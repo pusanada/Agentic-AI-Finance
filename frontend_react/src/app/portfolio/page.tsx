@@ -20,7 +20,8 @@ import {
   Search,
   ChevronRight,
   AlertTriangle,
-  ExternalLink
+  ExternalLink,
+  X
 } from 'lucide-react';
 
 export default function PortfolioAllocatorPage() {
@@ -37,6 +38,49 @@ export default function PortfolioAllocatorPage() {
 
   const t = translations[language];
 
+  const goalLabelMap: Record<string, string> = {
+    Growth: language === 'TH' ? 'Growth (เติบโตสูง)' : 'Growth',
+    Dividend: language === 'TH' ? 'Dividend (ปันผล)' : 'Dividend',
+    Balanced: language === 'TH' ? 'Balanced (สมดุล)' : 'Balanced',
+  };
+
+  const riskLabelMap: Record<string, string> = {
+    Conservative: language === 'TH' ? 'Conservative (เสี่ยงต่ำ)' : 'Conservative',
+    Moderate: language === 'TH' ? 'Moderate (ปานกลาง)' : 'Moderate',
+    Aggressive: language === 'TH' ? 'Aggressive (เสี่ยงสูง)' : 'Aggressive',
+  };
+
+  const parseHighRiskReason = (reason: string) => {
+    const lower = reason.toLowerCase();
+    if (lower.includes("contains stock ea") && (lower.includes("greenwashing") || lower.includes("conflict"))) {
+      return { type: "critical", text: "EA — Data Conflict (Greenwashing)" };
+    }
+    if (lower.includes("contains stock ea") && lower.includes("cgr score")) {
+      return { type: "critical", text: "EA — CGR Score < 90" };
+    }
+    if (lower.includes("contains stock ea") && (lower.includes("sec") || lower.includes("penalty") || lower.includes("penalties"))) {
+      return { type: "critical", text: "EA — SEC Penalties" };
+    }
+    if (lower.includes("contains stock ptt") && (lower.includes("greenwashing") || lower.includes("conflict"))) {
+      return { type: "warning", text: "PTT — Conflict Signal" };
+    }
+    if (lower.includes("contains stock ptt") && lower.includes("cgr score")) {
+      return { type: "warning", text: "PTT — CGR Score < 90 (2 จุด)" };
+    }
+    if (lower.includes("contains stock ptt") && lower.includes("disclosure")) {
+      return { type: "warning", text: "PTT — Disclosure Mismatch" };
+    }
+    if (lower.includes("ocr")) {
+      return { type: "warning", text: "OCR — Confidence Low" };
+    }
+    if (lower.includes("compliance")) {
+      return { type: "critical", text: "Compliance Guard Violation" };
+    }
+    // Fallback
+    const clean = reason.replace(/\s*\([+-][\d.]+%\)/g, '').trim();
+    return { type: "warning", text: clean };
+  };
+
   // Parameters inputs (prefilled from OCR if available)
   const [income, setIncome] = useState<number>(ocrResult?.assessable_income || 1200000.0);
   const [alreadyPurchased, setAlreadyPurchased] = useState<number>(ocrResult?.already_purchased || 0.0);
@@ -47,6 +91,8 @@ export default function PortfolioAllocatorPage() {
   // Pipeline simulation states for visual engagement
   const [pipelinePhase, setPipelinePhase] = useState<number>(0);
   const [expandedFundCode, setExpandedFundCode] = useState<string | null>(null);
+  const [explainScore, setExplainScore] = useState<boolean>(false);
+  const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
 
   // Sync inputs with OCRResult if it updates
   useEffect(() => {
@@ -55,6 +101,18 @@ export default function PortfolioAllocatorPage() {
       setAlreadyPurchased(ocrResult.already_purchased);
     }
   }, [ocrResult]);
+
+  // Lock body scroll when confirmation overlay is open
+  useEffect(() => {
+    if (showConfirmModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [showConfirmModal]);
 
   const handleAllocate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -197,7 +255,8 @@ export default function PortfolioAllocatorPage() {
   };
 
   return (
-    <div className="space-y-6 animate-slide-up text-slate-800 dark:text-slate-100">
+    <>
+      <div className="space-y-6 animate-slide-up text-slate-800 dark:text-slate-100">
       
       {/* Title */}
       <div className="text-center md:text-left">
@@ -309,36 +368,68 @@ export default function PortfolioAllocatorPage() {
             <div className="space-y-6">
               
               {/* Compliance & AUQ Alert Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className={`transition-all duration-300 ${
+                explainScore 
+                  ? 'flex flex-col gap-4' 
+                  : 'grid grid-cols-1 md:grid-cols-2 gap-4'
+              }`}>
                 
-                {/* Compliance Guard Shield Card */}
-                <div className={`rounded-2xl p-5 border shadow-lg flex items-start gap-4 ${
-                  portfolioResult.compliance.is_compliant 
-                    ? 'border-emerald-500/30 bg-emerald-950/10' 
-                    : 'border-red-500/30 bg-red-950/10'
-                }`}>
-                  <div className={`p-2.5 rounded-xl ${
-                    portfolioResult.compliance.is_compliant ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+                {explainScore ? (
+                  /* Compliance Guard Mini Card / Badge when AUQ is expanded */
+                  <div className={`rounded-xl p-3 border shadow-sm flex items-center justify-between transition-all duration-300 ${
+                    portfolioResult.compliance.is_compliant 
+                      ? 'border-emerald-500/20 bg-emerald-950/5 dark:bg-emerald-950/10' 
+                      : 'border-red-500/20 bg-red-950/5 dark:bg-red-950/10'
                   }`}>
-                    {portfolioResult.compliance.is_compliant ? <ShieldCheck className="w-8 h-8" /> : <ShieldAlert className="w-8 h-8" />}
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t.complianceStatus}</h3>
-                    <div className={`text-base font-bold mt-1 ${
-                      portfolioResult.compliance.is_compliant ? 'text-emerald-400' : 'text-red-400'
-                    }`}>
-                      {portfolioResult.compliance.is_compliant ? t.complianceCompliant : t.complianceViolated}
+                    <div className="flex items-center gap-2">
+                      <div className={`p-1.5 rounded-lg ${
+                        portfolioResult.compliance.is_compliant ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+                      }`}>
+                        {portfolioResult.compliance.is_compliant ? <ShieldCheck className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
+                      </div>
+                      <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{t.complianceStatus}:</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        portfolioResult.compliance.is_compliant ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+                      }`}>
+                        {portfolioResult.compliance.is_compliant ? t.complianceCompliant : t.complianceViolated}
+                      </span>
                     </div>
                     {portfolioResult.compliance.violations.length > 0 && (
-                      <div className="mt-2 text-xs text-red-400 bg-red-900/10 p-2.5 rounded-lg border border-red-500/20">
-                        <div className="font-semibold">{t.violationsFound}</div>
-                        <ul className="list-disc list-inside mt-1 space-y-0.5 opacity-80">
-                          {portfolioResult.compliance.violations.map((v, i) => <li key={i}>{v}</li>)}
-                        </ul>
-                      </div>
+                      <span className="text-[10px] font-semibold text-red-500 dark:text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md">
+                        {portfolioResult.compliance.violations.length} {language === 'TH' ? 'ข้อผิดพลาด' : 'Violations'}
+                      </span>
                     )}
                   </div>
-                </div>
+                ) : (
+                  /* Full Compliance Guard Shield Card when AUQ is collapsed */
+                  <div className={`rounded-2xl p-5 border shadow-lg flex items-start gap-4 transition-all duration-300 ${
+                    portfolioResult.compliance.is_compliant 
+                      ? 'border-emerald-500/30 bg-emerald-950/10' 
+                      : 'border-red-500/30 bg-red-950/10'
+                  }`}>
+                    <div className={`p-2.5 rounded-xl ${
+                      portfolioResult.compliance.is_compliant ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+                    }`}>
+                      {portfolioResult.compliance.is_compliant ? <ShieldCheck className="w-8 h-8" /> : <ShieldAlert className="w-8 h-8" />}
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t.complianceStatus}</h3>
+                      <div className={`text-base font-bold mt-1 ${
+                        portfolioResult.compliance.is_compliant ? 'text-emerald-400' : 'text-red-400'
+                      }`}>
+                        {portfolioResult.compliance.is_compliant ? t.complianceCompliant : t.complianceViolated}
+                      </div>
+                      {portfolioResult.compliance.violations.length > 0 && (
+                        <div className="mt-2 text-xs text-red-400 bg-red-900/10 p-2.5 rounded-lg border border-red-500/20">
+                          <div className="font-semibold">{t.violationsFound}</div>
+                          <ul className="list-disc list-inside mt-1 space-y-0.5 opacity-80">
+                            {portfolioResult.compliance.violations.map((v, i) => <li key={i}>{v}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* AUQ System Confidence Card */}
                 <div className="rounded-2xl p-5 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-lg flex items-start gap-4 text-slate-800 dark:text-slate-100">
@@ -374,6 +465,123 @@ export default function PortfolioAllocatorPage() {
                         style={{ width: `${portfolioResult.auq.confidence_score}%` }}
                       ></div>
                     </div>
+
+                    {/* Glass Box Explain Score Toggle Button */}
+                    <button 
+                      type="button"
+                      onClick={() => setExplainScore(!explainScore)}
+                      className="mt-3 text-[11px] font-semibold text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition-colors inline-flex items-center gap-1 cursor-pointer focus:outline-none"
+                    >
+                      <span>{explainScore ? '▲ ซ่อนวิธีคำนวณ' : '▼ ดูวิธีคำนวณ (Explain Score)'}</span>
+                    </button>
+
+                    {/* Glass Box Score Breakdown Dropdown */}
+                    {explainScore && (
+                      <div className="mt-3 p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 space-y-3 transition-all duration-300">
+                        <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-800/80 pb-2">
+                          <span>🔍 Breakdown</span>
+                        </div>
+                        
+                        <div className="font-mono text-xs space-y-2">
+                          {/* Starting Score */}
+                          <div className="flex justify-between items-center text-slate-600 dark:text-slate-300">
+                            <span className="text-slate-500 dark:text-slate-400 text-[11px]">Starting Score</span>
+                            <span className="font-bold text-slate-900 dark:text-white">100%</span>
+                          </div>
+
+                          {/* Dynamic Reasons */}
+                          <div className="space-y-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                            {portfolioResult.auq.reasons.map((reason, idx) => {
+                              const parsed = (() => {
+                                const match = reason.match(/\(([+-][\d.]+)%\)/);
+                                if (match) {
+                                  const val = match[1];
+                                  const cleanText = reason.replace(/\s*\([+-][\d.]+%\)/g, '').trim();
+                                  const parsedVal = parseFloat(val);
+                                  const sign = parsedVal > 0 ? '+' : '';
+                                  
+                                  // Apply short/concise mappings
+                                  let displayText = cleanText;
+                                  const lowerText = cleanText.toLowerCase();
+                                  
+                                  if (lowerText.includes("ocr")) {
+                                    displayText = "OCR Confidence";
+                                  } else if (lowerText.includes("investor risk profile") || lowerText.includes("kyc")) {
+                                    displayText = "Kyc Incomplete";
+                                  } else if (lowerText.includes("compliance checks failed") || lowerText.includes("violations detected")) {
+                                    displayText = "Compliance Failed";
+                                  } else if (lowerText.includes("custom allocation instructions") || lowerText.includes("custom instructions")) {
+                                    displayText = "Custom Instructions";
+                                  } else if (lowerText.includes("contains stock ptt") && lowerText.includes("conflicting disclosures")) {
+                                    // Count occurrences of PTT greenwashing conflict before this index
+                                    let pttCountBefore = 0;
+                                    for (let i = 0; i < idx; i++) {
+                                      const prevReason = portfolioResult.auq.reasons[i].toLowerCase();
+                                      if (prevReason.includes("contains stock ptt") && prevReason.includes("conflicting disclosures")) {
+                                        pttCountBefore++;
+                                      }
+                                    }
+                                    displayText = pttCountBefore === 0 ? "PTT Conflict" : "PTT Disclosure";
+                                  } else if (lowerText.includes("contains stock ea") && lowerText.includes("conflicting disclosures")) {
+                                    displayText = "EA Controversy";
+                                  } else if (lowerText.includes("contains stock ea") && lowerText.includes("cgr score")) {
+                                    displayText = "CGR Below Threshold";
+                                  } else if (lowerText.includes("contains stock ea") && lowerText.includes("sec")) {
+                                    displayText = "SEC Warning";
+                                  } else {
+                                    // General fallback ticker parsing
+                                    const tickerMatch = cleanText.match(/stock ([A-Z0-9]+)/i);
+                                    const ticker = tickerMatch ? tickerMatch[1] : "";
+                                    if (lowerText.includes("greenwashing") || lowerText.includes("conflict")) {
+                                      displayText = ticker ? `${ticker} Conflict` : "Greenwashing Conflict";
+                                    } else if (lowerText.includes("cgr score")) {
+                                      displayText = ticker ? `${ticker} CGR Low` : "CGR Score Violation";
+                                    } else if (lowerText.includes("sec")) {
+                                      displayText = ticker ? `${ticker} SEC Warning` : "SEC Warning";
+                                    }
+                                  }
+
+                                  return { 
+                                    percentage: parsedVal === 0 ? '0%' : `${sign}${parsedVal}%`, 
+                                    text: displayText 
+                                  };
+                                }
+                                return { percentage: '0%', text: reason };
+                              })();
+                              
+                              const isNegative = parsed.percentage.startsWith('-');
+                              const colorClass = isNegative ? 'text-red-500 dark:text-red-400 font-bold' : 'text-slate-400 dark:text-slate-500';
+
+                              return (
+                                <div key={idx} className="flex justify-between items-start gap-3 leading-normal">
+                                  <span className="text-slate-500 dark:text-slate-400 text-[11px] flex-1">{parsed.text}</span>
+                                  <span className={`text-right shrink-0 ${colorClass}`}>{parsed.percentage}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Final Score */}
+                          <div className="flex justify-between items-center text-slate-900 dark:text-white pt-1">
+                            <span className="font-bold">Final Score</span>
+                            <span className="font-extrabold text-emerald-500 dark:text-emerald-400 text-sm">{portfolioResult.auq.confidence_score}%</span>
+                          </div>
+                        </div>
+                        
+                        {/* Recommendation */}
+                        <div className="text-[10px] bg-blue-500/5 border border-blue-500/10 p-2.5 rounded-lg text-slate-600 dark:text-slate-400 leading-normal font-sans">
+                          <div className="font-bold text-blue-500 dark:text-blue-400 mb-0.5">
+                            {language === 'TH' ? 'คำแนะนำระบบ:' : 'Recommendation:'}
+                          </div>
+                          <div>
+                            {portfolioResult.auq.requires_override 
+                              ? (language === 'TH' ? 'ต้องการความเห็นชอบจากผู้เชี่ยวชาญ (Human Review Required)' : 'Human Review Required')
+                              : (language === 'TH' ? 'ผ่านเกณฑ์ตรวจสอบอัตโนมัติ (Auto-Approved)' : 'Auto-Approved')
+                            }
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -534,9 +742,20 @@ export default function PortfolioAllocatorPage() {
               {/* Glassmorphism Action Bar */}
               <div className="glass-panel border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl mt-4">
                 <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping shrink-0 mt-1 animate-pulse-slow"></div>
+                  <div className={`w-2.5 h-2.5 rounded-full animate-ping shrink-0 mt-1 ${
+                    portfolioResult.compliance.is_compliant 
+                      ? 'bg-emerald-500' 
+                      : 'bg-amber-500'
+                  }`}></div>
                   <span className="text-xs text-slate-700 dark:text-slate-300 font-semibold leading-relaxed break-words">
-                    {language === 'TH' ? 'ตรวจสอบสัดส่วนการลงทุนผ่านเกณฑ์ทั้งหมด ระบบพร้อมดำเนินการจัดส่งคำสั่งซื้อ' : 'Validation checks passed. Ready to lock quota and execute portfolio trades.'}
+                    {portfolioResult.compliance.is_compliant 
+                      ? (language === 'TH' 
+                          ? 'ตรวจสอบสัดส่วนการลงทุนผ่านเกณฑ์ทั้งหมด ระบบพร้อมดำเนินการจัดส่งคำสั่งซื้อ' 
+                          : 'Validation checks passed. Ready to lock quota and execute portfolio trades.')
+                      : (language === 'TH'
+                          ? 'พบการละเมิดเกณฑ์ตรวจสอบ (Compliance Violation) ระบบล็อกการจัดส่งคำสั่งซื้อชั่วคราว กรุณาส่งต่อข้อมูลให้ CFA พิจารณา'
+                          : 'Compliance violations detected. Execution blocked. Please escalate to a CFA analyst.')
+                    }
                   </span>
                 </div>
                 
@@ -549,10 +768,19 @@ export default function PortfolioAllocatorPage() {
                     <span>{language === 'TH' ? 'ส่งต่อให้ CFA ตรวจสอบ' : 'Escalate to CFA'}</span>
                   </button>
                   <button
-                    onClick={() => alert(language === 'TH' ? 'ดำเนินการจัดสรรสิทธิ์และสั่งซื้อกองทุน ThaiESG สำเร็จ!' : 'Portfolio executed successfully. Asset allocation trades completed.')}
-                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md hover:shadow-lg transition-all duration-300 hover:scale-[1.01] cursor-pointer"
+                    disabled={!portfolioResult.compliance.is_compliant}
+                    onClick={() => setShowConfirmModal(true)}
+                    className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4.5 py-2.5 text-white font-bold text-xs rounded-xl shadow-md transition-all duration-300 ${
+                      portfolioResult.compliance.is_compliant
+                        ? 'bg-blue-600 hover:bg-blue-700 hover:shadow-lg hover:scale-[1.01] cursor-pointer'
+                        : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-50 border border-slate-300 dark:border-slate-700'
+                    }`}
                   >
-                    <ShieldCheck className="w-3.5 h-3.5 text-blue-200" />
+                    <ShieldCheck className={`w-3.5 h-3.5 ${
+                      portfolioResult.compliance.is_compliant 
+                        ? 'text-blue-200' 
+                        : 'text-slate-400 dark:text-slate-600'
+                    }`} />
                     <span>{language === 'TH' ? 'ยืนยันสั่งซื้อและจัดพอร์ต' : 'Confirm and Execute'}</span>
                   </button>
                 </div>
@@ -636,6 +864,230 @@ export default function PortfolioAllocatorPage() {
         </div>
 
       </div>
-    </div>
+      </div>
+
+      {showConfirmModal && portfolioResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200 text-white relative flex flex-col max-h-[90vh] overflow-hidden">
+            <button 
+              onClick={() => setShowConfirmModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {portfolioResult.auq.uncertainty_rating === 'HIGH' ? (
+              /* SPECIAL CASE: AUQ = HIGH (คำเตือน: พอร์ตนี้มีความเสี่ยงสูงมาก) */
+              <>
+                {/* Header */}
+                <div className="flex items-center gap-2 mb-4 border-b border-red-950 pb-3 shrink-0">
+                  <span className="text-xl shrink-0">🛑</span>
+                  <h3 className="text-base font-extrabold text-red-400 uppercase tracking-wide">
+                    {language === 'TH' ? 'คำเตือน: พอร์ตนี้มีความเสี่ยงสูงมาก' : 'Warning: High Risk Portfolio'}
+                  </h3>
+                </div>
+
+                {/* Scrollable Details */}
+                <div className="overflow-y-auto flex-1 pr-1 space-y-4 mb-4">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
+                    <span>⚠️</span>
+                    <span>AUQ Confidence:</span>
+                    <span className="font-mono text-red-500 font-extrabold">{portfolioResult.auq.confidence_score}% (HIGH)</span>
+                  </div>
+
+                  {/* Warning list Box */}
+                  <div className="bg-red-950/20 border border-red-900/30 rounded-2xl p-4.5 text-xs">
+                    <h4 className="font-bold text-slate-400 mb-2.5 uppercase tracking-wide">
+                      {language === 'TH' ? 'ระบบตรวจพบ:' : 'System Detected:'}
+                    </h4>
+                    
+                    <div className="space-y-2 font-mono text-[11px] leading-relaxed">
+                      {portfolioResult.auq.reasons
+                        .filter(r => !r.toLowerCase().includes("verified") && !r.toLowerCase().includes("+0%"))
+                        .map((reason, idx) => {
+                          const parsed = parseHighRiskReason(reason);
+                          const bullet = parsed.type === "critical" ? "🔴" : "🟡";
+                          return (
+                            <div key={idx} className="flex items-start gap-2">
+                              <span className="shrink-0 mt-0.5">{bullet}</span>
+                              <span className="text-slate-200">{parsed.text}</span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+
+                  {/* Locked text */}
+                  <div className="text-center font-bold text-red-400 text-xs py-2 flex items-center justify-center gap-1.5 animate-pulse">
+                    <span>❌</span>
+                    <span>{language === 'TH' ? 'ไม่สามารถยืนยันได้ด้วยตนเอง' : 'Cannot self-confirm execution'}</span>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex flex-col gap-2 shrink-0">
+                  <button
+                    onClick={() => {
+                      setShowConfirmModal(false);
+                      alert(language === 'TH' ? 'ส่งต่อข้อมูลพอร์ตการลงทุนนี้ให้ CFA ผู้เชี่ยวชาญตรวจสอบความสอดคล้องเรียบร้อยแล้ว' : 'Portfolio construction escalated to CFA analyst.');
+                    }}
+                    className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl shadow-md transition-all duration-200 text-center hover:scale-[1.01] cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700"
+                  >
+                    <span>📩</span>
+                    <span>{language === 'TH' ? 'ส่งให้ผู้เชี่ยวชาญตรวจสอบ' : 'Escalate to Expert for Review'}</span>
+                  </button>
+                  <button
+                    onClick={() => setShowConfirmModal(false)}
+                    className="w-full py-3 bg-red-650 hover:bg-red-750 text-white font-bold text-xs rounded-xl shadow-md transition-all duration-200 text-center hover:scale-[1.01] cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <span>❌</span>
+                    <span>{language === 'TH' ? 'ยกเลิก' : 'Cancel'}</span>
+                  </button>
+                </div>
+              </>
+            ) : (
+              /* NORMAL CASE: BEFORE PORTFOLIO CONFIRMATION (ยืนยันการจัดพอร์ตและสั่งซื้อ) */
+              <>
+                {/* Header */}
+                <div className="flex items-center gap-2 mb-4 border-b border-slate-800 pb-3 shrink-0">
+                  <span className="text-xl shrink-0">⚠️</span>
+                  <h3 className="text-base font-extrabold text-slate-100 uppercase tracking-wide">
+                    {language === 'TH' ? 'ยืนยันการจัดพอร์ตและสั่งซื้อ ThaiESG' : 'Confirm Portfolio & Buy ThaiESG'}
+                  </h3>
+                </div>
+
+                {/* Scrollable Content */}
+                <div className="overflow-y-auto flex-1 pr-1 space-y-4 mb-4">
+                  {/* Sub Container: สรุปพอร์ตการลงทุน */}
+                  <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4.5 space-y-4">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-400 mb-2 flex items-center gap-1.5 uppercase">
+                        <span>📊</span> {language === 'TH' ? 'สรุปพอร์ตการลงทุน' : 'Portfolio Summary'}
+                      </h4>
+                      <div className="space-y-1.5 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">{language === 'TH' ? 'เป้าหมาย:' : 'Goal:'}</span>
+                          <span className="font-semibold text-slate-200">{goalLabelMap[goal] || goal}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">{language === 'TH' ? 'ระดับความเสี่ยง:' : 'Risk Profile:'}</span>
+                          <span className="font-semibold text-slate-200">{riskLabelMap[riskProfile] || riskProfile}</span>
+                        </div>
+                        <div className="flex justify-between items-baseline pt-0.5 border-t border-slate-900 mt-1">
+                          <span className="text-slate-500">{language === 'TH' ? 'เงินลงทุนรวม:' : 'Total Investment:'}</span>
+                          <span className="font-bold font-mono text-emerald-400 text-sm">
+                            ฿{portfolioResult.portfolio.total_allocated.toLocaleString('en-US', { maximumFractionDigits: 0 })} {language === 'TH' ? 'บาท' : 'THB'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Fund list nested box */}
+                    <div className="border border-slate-800/80 rounded-xl overflow-hidden bg-slate-900/50 text-[11px]">
+                      <div className="grid grid-cols-12 bg-slate-950/80 px-3 py-1.5 font-bold text-slate-500 border-b border-slate-800/60 uppercase">
+                        <div className="col-span-6">{language === 'TH' ? 'กองทุน' : 'Fund'}</div>
+                        <div className="col-span-3 text-center">{language === 'TH' ? 'สัดส่วน' : 'Weight'}</div>
+                        <div className="col-span-3 text-right">{language === 'TH' ? 'จำนวน' : 'Amount'}</div>
+                      </div>
+                      <div className="divide-y divide-slate-900">
+                        {portfolioResult.portfolio.allocations.map((item) => (
+                          <div key={item.fund_code} className="grid grid-cols-12 px-3 py-2 text-slate-300 font-mono items-center">
+                            <div className="col-span-6 font-sans font-bold text-slate-200 flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                              {item.fund_code}
+                            </div>
+                            <div className="col-span-3 text-center font-bold">{(item.weight * 100).toFixed(0)}%</div>
+                            <div className="col-span-3 text-right text-emerald-400 font-bold">
+                              ฿{item.amount.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Safety check summary */}
+                  <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4.5">
+                    <h4 className="text-xs font-bold text-slate-400 mb-2 flex items-center gap-1.5 uppercase">
+                      <span>🛡️</span> {language === 'TH' ? 'การตรวจสอบความปลอดภัย' : 'Safety & Compliance Check'}
+                    </h4>
+                    <div className="space-y-1.5 text-xs font-semibold">
+                      <div className="flex items-center gap-2">
+                        <span>{portfolioResult.compliance.is_compliant ? '✅' : '❌'}</span>
+                        <span className="text-slate-400">{language === 'TH' ? 'Compliance Guard:' : 'Compliance Guard:'}</span>
+                        <span className={portfolioResult.compliance.is_compliant ? 'text-emerald-400' : 'text-red-400'}>
+                          {portfolioResult.compliance.is_compliant ? (language === 'TH' ? 'ผ่าน' : 'Passed') : (language === 'TH' ? 'ไม่ผ่าน' : 'Violated')}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span>✅</span>
+                        <span className="text-slate-400">{language === 'TH' ? 'วงเงิน ThaiESG คงเหลือ:' : 'Remaining ThaiESG Quota:'}</span>
+                        <span className="text-slate-200 font-mono">
+                          ฿{portfolioResult.quota.remaining_quota.toLocaleString('en-US', { maximumFractionDigits: 0 })} {language === 'TH' ? 'บาท' : 'THB'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span>✅</span>
+                        <span className="text-slate-400">{language === 'TH' ? 'ระยะเวลาถือครอง:' : 'Holding Period:'}</span>
+                        <span className="text-slate-200">
+                          5 {language === 'TH' ? 'ปี (ตามเกณฑ์)' : 'Years (Compliant)'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span>⚠️</span>
+                        <span className="text-slate-400">AUQ Confidence:</span>
+                        <span className={`font-mono ${
+                          portfolioResult.auq.confidence_score >= 80 ? 'text-emerald-400 font-bold' : portfolioResult.auq.confidence_score >= 70 ? 'text-yellow-400 font-bold' : 'text-red-400 font-bold'
+                        }`}>
+                          {portfolioResult.auq.confidence_score}% ({portfolioResult.auq.uncertainty_rating})
+                        </span>
+                      </div>
+                      {portfolioResult.auq.requires_override && (
+                        <div className="flex items-center gap-2 text-yellow-500 text-[11px] pt-1.5 font-bold pl-1 animate-pulse">
+                          <span>📌</span>
+                          <span>{language === 'TH' ? 'ต้องได้รับความเห็นชอบจากผู้เชี่ยวชาญก่อน' : 'Analyst override approval required'}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-3 shrink-0">
+                  <button
+                    onClick={() => {
+                      setShowConfirmModal(false);
+                      alert(language === 'TH' ? 'ดำเนินการจัดส่งคำสั่งซื้อสำเร็จ!' : 'Order executed successfully!');
+                    }}
+                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-all duration-200 text-center hover:scale-[1.02] cursor-pointer flex items-center justify-center gap-1.5 border border-emerald-500/20"
+                  >
+                    <span>✅</span>
+                    <span>{language === 'TH' ? 'ยืนยัน' : 'Confirm'}</span>
+                  </button>
+                  <button
+                    onClick={() => setShowConfirmModal(false)}
+                    className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl shadow-md transition-all duration-200 text-center hover:scale-[1.02] cursor-pointer flex items-center justify-center gap-1.5 border border-red-500/20"
+                  >
+                    <span>❌</span>
+                    <span>{language === 'TH' ? 'ยกเลิก' : 'Cancel'}</span>
+                  </button>
+                </div>
+
+                {/* Disclaimer */}
+                <div className="text-[10px] text-slate-400 leading-normal pl-1 flex items-start gap-1">
+                  <span className="text-[12px] shrink-0 mt-0.5">💡</span>
+                  <p>
+                    {language === 'TH' 
+                      ? 'การยืนยันนี้ถือว่าท่านรับทราบความเสี่ยงและเงื่อนไขการลงทุนตามที่ระบบแสดงไว้ข้างต้น' 
+                      : 'By confirming, you acknowledge the investment risks and compliance constraints displayed above.'}
+                  </p>
+                </div>
+              </>
+            )}
+
+          </div>
+        </div>
+      )}
+    </>
   );
 }
