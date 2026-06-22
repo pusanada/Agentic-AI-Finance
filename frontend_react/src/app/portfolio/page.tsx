@@ -82,8 +82,8 @@ export default function PortfolioAllocatorPage() {
   };
 
   // Parameters inputs (prefilled from OCR if available)
-  const [income, setIncome] = useState<number>(ocrResult?.assessable_income || 1200000.0);
-  const [alreadyPurchased, setAlreadyPurchased] = useState<number>(ocrResult?.already_purchased || 0.0);
+  const [income, setIncome] = useState<number | ''>(ocrResult?.assessable_income ?? 1200000.0);
+  const [alreadyPurchased, setAlreadyPurchased] = useState<number | ''>(ocrResult?.already_purchased ?? 0.0);
   const [goal, setGoal] = useState<'Growth' | 'Dividend' | 'Balanced'>('Growth');
   const [riskProfile, setRiskProfile] = useState<'Conservative' | 'Moderate' | 'Aggressive'>('Moderate');
   const [userInstructions, setUserInstructions] = useState<string>('');
@@ -97,8 +97,8 @@ export default function PortfolioAllocatorPage() {
   // Sync inputs with OCRResult if it updates
   useEffect(() => {
     if (ocrResult) {
-      setIncome(ocrResult.assessable_income);
-      setAlreadyPurchased(ocrResult.already_purchased);
+      setIncome(ocrResult.assessable_income ?? '');
+      setAlreadyPurchased(ocrResult.already_purchased ?? '');
     }
   }, [ocrResult]);
 
@@ -144,8 +144,8 @@ export default function PortfolioAllocatorPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          assessable_income: income,
-          already_purchased: alreadyPurchased,
+          assessable_income: income === '' ? 0 : income,
+          already_purchased: alreadyPurchased === '' ? 0 : alreadyPurchased,
           financial_goal: goal,
           risk_profile: riskProfile,
           user_instructions: userInstructions,
@@ -290,7 +290,10 @@ export default function PortfolioAllocatorPage() {
                   <input
                     type="number"
                     value={income}
-                    onChange={(e) => setIncome(Number(e.target.value))}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setIncome(val === '' ? '' : Number(val));
+                    }}
                     className="w-full px-3.5 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:border-emerald-400 transition-all font-mono"
                   />
                 </div>
@@ -299,7 +302,10 @@ export default function PortfolioAllocatorPage() {
                   <input
                     type="number"
                     value={alreadyPurchased}
-                    onChange={(e) => setAlreadyPurchased(Number(e.target.value))}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setAlreadyPurchased(val === '' ? '' : Number(val));
+                    }}
                     className="w-full px-3.5 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:border-emerald-400 transition-all font-mono"
                   />
                 </div>
