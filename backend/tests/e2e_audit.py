@@ -133,7 +133,7 @@ def run_audit():
     report_lines.append("1. **State Memory Management**: The current in-memory cache for state is session-based. Consider backing it with Redis or ChromaDB for multi-instance production scalability.")
     report_lines.append("2. **Strong Typing on Data Envelope**: Use Pydantic's generic models `Envelope[T]` instead of `Any` to guarantee strict deserialization schemas of agent data fields in production.")
     
-    report_path = Path("C:/Users/LOQ/.gemini/antigravity-ide/brain/dff42c39-5c2e-42af-ba7f-077a39976978/supervisor_e2e_audit_report.md")
+    report_path = Path(__file__).resolve().parent.parent.parent / "supervisor_e2e_audit_report.md"
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("\n".join(report_lines))
         

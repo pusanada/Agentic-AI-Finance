@@ -276,20 +276,39 @@ class ESGClient:
         Saves result to state_manager if session_id is provided.
         """
         ticker_upper = ticker.upper()
-        url = f"{self.base_url}/api/v1/report/{ticker_upper}"
         report = None
         
         try:
-            logger.info(f"Requesting ESG report from ESG Analyst API: {url}")
-            response = httpx.get(url, timeout=5.0)
-            if response.status_code == 200:
-                data = response.json()
-                logger.info(f"Successfully retrieved ESG report for {ticker_upper}")
+            logger.info(f"Invoking local ESGAgent for {ticker_upper}")
+            from backend.esg_analyst.agents.esg_agent import ESGAgent
+            agent = ESGAgent()
+            
+            # Check if there are local files already uploaded in settings.esg_pdf_dir & settings.esg_audio_dir
+            cvup_path = settings.esg_pdf_dir / f"{ticker_upper}_CVUP.pdf"
+            onereport_path = settings.esg_pdf_dir / f"{ticker_upper}_OneReport.pdf"
+            audio_path = settings.esg_audio_dir / f"{ticker_upper}_OppDay.mp3"
+            if not audio_path.exists():
+                audio_path = settings.esg_audio_dir / f"{ticker_upper}_OppDay.wav"
+
+            cvup_p = cvup_path if cvup_path.exists() else None
+            onereport_p = onereport_path if onereport_path.exists() else None
+            audio_p = audio_path if audio_path.exists() else None
+
+            data = agent.analyze_ticker(
+                ticker=ticker_upper,
+                cvup_pdf=cvup_p,
+                onereport_pdf=onereport_p,
+                opp_day_audio=audio_p
+            )
+            
+            if data and data.get("status") != "FAILED":
+                logger.info(f"Successfully retrieved local ESG report for {ticker_upper}")
                 report = ESGAnalysisReport.model_validate(data)
             else:
-                logger.warning(f"ESG Analyst API returned status code {response.status_code}. Using fallback mock data.")
+                logger.warning(f"Local ESGAgent returned failed status for {ticker_upper}. Using fallback mock data.")
         except Exception as e:
-            logger.warning(f"Failed to connect to ESG Analyst API ({str(e)}). Using fallback mock data.")
+            logger.warning(f"Failed to connect to local ESG Analyst agent ({str(e)}). Using fallback mock data.")
+
 
         if not report:
             fallback_data = MOCK_REPORTS.get(ticker_upper)

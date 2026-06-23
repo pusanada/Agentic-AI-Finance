@@ -5,3 +5,6 @@ __pycache__/
 .pytest_cache/
 .env
 .agents/
+esg_data/
+supervisor_e2e_audit_report.md
+

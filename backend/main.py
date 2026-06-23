@@ -19,6 +19,11 @@ from backend.services.compliance_guard import check_portfolio_compliance, Compli
 from backend.services.auq_manager import evaluate_system_confidence, evaluate_system_confidence_from_state, AUQReport
 from backend.services.state_manager import state_manager
 
+# Import local ESG Analyst components
+from backend.esg_analyst.agents.esg_agent import ESGAgent
+from backend.esg_analyst.services.set_service import SETService
+
+
 app = FastAPI(
     title="ThaiESG Portfolio Allocator & Compliance Guard API",
     description="Backend service for orchestrating ThaiESG tax quota calculations, ESG fund screening, portfolio allocation, and compliance safeguards.",
@@ -244,7 +249,7 @@ def allocate_portfolio(request: PortfolioAllocateRequest):
         
         # Step 3: AUQ Supervisor Evaluation from State Manager (Consumes all confidence scores)
         auq_res = evaluate_system_confidence_from_state(sess_id)
-        trace.append(f"AUQ Supervisor: Confidence computed as {auq_res.confidence_score}% (Rating: {auq_res.uncertainty_rating})")
+        trace.append(f"AUQ Supervisor: Confidence computed as {auq_res.confidence_score}% (Uncertainty Level: {auq_res.uncertainty_rating})")
         
         return PortfolioAllocateResponse(
             quota=quota_res,
@@ -359,7 +364,7 @@ def allocate_generic_portfolio(request: GenericPortfolioAllocateRequest):
         
         # Step 3: AUQ Supervisor Evaluation from State Manager (Consumes all confidence scores)
         auq_res = evaluate_system_confidence_from_state(sess_id)
-        trace.append(f"AUQ Supervisor: Confidence computed as {auq_res.confidence_score}% (Rating: {auq_res.uncertainty_rating})")
+        trace.append(f"AUQ Supervisor: Confidence computed as {auq_res.confidence_score}% (Uncertainty Level: {auq_res.uncertainty_rating})")
         
         return GenericPortfolioAllocateResponse(
             portfolio=portfolio,
@@ -375,6 +380,130 @@ def allocate_generic_portfolio(request: GenericPortfolioAllocateRequest):
             detail=f"Orchestrator allocation failure: {str(e)}"
         )
 
+# Instantiate the ESG Analyst agent
+esg_agent = ESGAgent()
+
+@app.get("/api/v1/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "typhoon_configured": bool(settings.typhoon_api_key),
+        "claude_configured": bool(settings.anthropic_api_key)
+    }
+
+@app.get("/api/v1/screen")
+def screen_stocks():
+    """
+    Runs the first stage screening for all listed stocks.
+    Returns the passed and failed stocks.
+    """
+    all_stocks = SETService.get_all_stocks()
+    passed_stocks = []
+    failed_stocks = []
+    
+    for stock in all_stocks:
+        result = esg_agent.analyze_ticker(stock["ticker"])
+        if result.get("status") == "APPROVED":
+            passed_stocks.append(result)
+        else:
+            failed_stocks.append(result)
+            
+    return {
+        "passed_count": len(passed_stocks),
+        "failed_count": len(failed_stocks),
+        "passed": passed_stocks,
+        "failed": failed_stocks
+    }
+
+@app.post("/api/v1/analyze/{ticker}")
+async def analyze_ticker(
+    ticker: str,
+    cvup_file: Optional[UploadFile] = File(None),
+    onereport_file: Optional[UploadFile] = File(None),
+    audio_file: Optional[UploadFile] = File(None)
+):
+    """
+    Upload files and run the full in-depth ESG and credibility analysis for a ticker.
+    """
+    import os
+    import shutil
+    ticker_upper = ticker.upper()
+    stock_data = SETService.get_stock_by_ticker(ticker_upper)
+    if not stock_data:
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker_upper} not found in SET database.")
+
+    # Paths to save uploaded files locally
+    cvup_path = None
+    onereport_path = None
+    audio_path = None
+
+    try:
+        # Save CVUP PDF
+        if cvup_file:
+            cvup_path = settings.esg_pdf_dir / f"{ticker_upper}_CVUP.pdf"
+            with open(cvup_path, "wb") as buffer:
+                shutil.copyfileobj(cvup_file.file, buffer)
+
+        # Save One Report PDF
+        if onereport_file:
+            onereport_path = settings.esg_pdf_dir / f"{ticker_upper}_OneReport.pdf"
+            with open(onereport_path, "wb") as buffer:
+                shutil.copyfileobj(onereport_file.file, buffer)
+
+        # Save Audio File
+        if audio_file:
+            # Detect extension
+            ext = os.path.splitext(audio_file.filename)[1] or ".mp3"
+            audio_path = settings.esg_audio_dir / f"{ticker_upper}_OppDay{ext}"
+            with open(audio_path, "wb") as buffer:
+                shutil.copyfileobj(audio_file.file, buffer)
+
+        # Run ESG Analysis
+        report = esg_agent.analyze_ticker(
+            ticker=ticker_upper,
+            cvup_pdf=cvup_path,
+            onereport_pdf=onereport_path,
+            opp_day_audio=audio_path
+        )
+        return report
+
+    except Exception as e:
+        # Cleanup uploaded files in case of error
+        for p in [cvup_path, onereport_path, audio_path]:
+            if p and p.exists():
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+@app.get("/api/v1/report/{ticker}")
+def get_report(ticker: str):
+    """
+    Retrieves the report or runs analysis with whatever data is already available.
+    """
+    ticker_upper = ticker.upper()
+    
+    # Check if there are local files already uploaded
+    cvup_path = settings.esg_pdf_dir / f"{ticker_upper}_CVUP.pdf"
+    onereport_path = settings.esg_pdf_dir / f"{ticker_upper}_OneReport.pdf"
+    audio_path = settings.esg_audio_dir / f"{ticker_upper}_OppDay.mp3"
+    if not audio_path.exists():
+        audio_path = settings.esg_audio_dir / f"{ticker_upper}_OppDay.wav"
+
+    cvup_p = cvup_path if cvup_path.exists() else None
+    onereport_p = onereport_path if onereport_path.exists() else None
+    audio_p = audio_path if audio_path.exists() else None
+
+    report = esg_agent.analyze_ticker(
+        ticker=ticker_upper,
+        cvup_pdf=cvup_p,
+        onereport_pdf=onereport_p,
+        opp_day_audio=audio_p
+    )
+    return report
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=8080, reload=True)
+
