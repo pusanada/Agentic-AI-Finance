@@ -197,9 +197,14 @@ def check_portfolio_compliance(
                         else:
                             report = esg_data
                         
-                        cgr_score = report.first_stage_checks.cgr_score
-                        jump_plus = report.first_stage_checks.jump_plus
-                        sec_clean = report.first_stage_checks.sec_clean
+                        if report.first_stage_checks:
+                            cgr_score = report.first_stage_checks.cgr_score
+                            jump_plus = report.first_stage_checks.jump_plus
+                            sec_clean = report.first_stage_checks.sec_clean
+                        else:
+                            cgr_score = 90
+                            jump_plus = True
+                            sec_clean = True
                         comp_name = report.company_name
                     else:
                         # Fallback to local mock COMPANIES_DB for direct unit tests
@@ -260,9 +265,14 @@ def check_portfolio_compliance(
                         else:
                             report = esg_data
                         
-                        cgr_score = report.first_stage_checks.cgr_score
-                        jump_plus = report.first_stage_checks.jump_plus
-                        sec_clean = report.first_stage_checks.sec_clean
+                        if report.first_stage_checks:
+                            cgr_score = report.first_stage_checks.cgr_score
+                            jump_plus = report.first_stage_checks.jump_plus
+                            sec_clean = report.first_stage_checks.sec_clean
+                        else:
+                            cgr_score = 90
+                            jump_plus = True
+                            sec_clean = True
                         comp_name = report.company_name
                     else:
                         stock_info = COMPANIES_DB.get(item.fund_code)

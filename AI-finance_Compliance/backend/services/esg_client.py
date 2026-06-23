@@ -3,6 +3,7 @@ import httpx
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from backend.config import settings
+from backend.esg_analyst.agents.esg_agent import ESGAgent
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +30,15 @@ class ESGAnalysisReport(BaseModel):
     ticker: str
     company_name: str
     status: str
-    overall_score: float
-    weighted_breakdown: Dict[str, float]
-    first_stage_checks: FirstStageChecks
-    document_audit: DocumentAudit
-    audio_credibility: AudioCredibility
-    executive_summary_th: str
+    overall_score: Optional[float] = 0.0
+    weighted_breakdown: Optional[Dict[str, float]] = Field(default_factory=dict)
+    first_stage_checks: Optional[FirstStageChecks] = None
+    document_audit: Optional[DocumentAudit] = None
+    audio_credibility: Optional[AudioCredibility] = None
+    executive_summary_th: Optional[str] = ""
     key_strengths: List[str] = Field(default_factory=list)
     risks_and_warnings: List[str] = Field(default_factory=list)
-    investment_recommendation: str
+    investment_recommendation: Optional[str] = ""
 
 # Mock Database for Fallback
 MOCK_REPORTS = {
@@ -271,25 +272,21 @@ class ESGClient:
 
     def get_esg_report(self, ticker: str, session_id: Optional[str] = None) -> ESGAnalysisReport:
         """
-        Fetches the ESG Report for a given ticker from JUMP+ ESG Analyst API.
-        Falls back to mock data if connection fails or API returns non-200.
+        Fetches the ESG Report for a given ticker from the local in-process ESGAgent.
+        Falls back to mock data if execution fails.
         Saves result to state_manager if session_id is provided.
         """
         ticker_upper = ticker.upper()
-        url = f"{self.base_url}/api/v1/report/{ticker_upper}"
         report = None
         
         try:
-            logger.info(f"Requesting ESG report from ESG Analyst API: {url}")
-            response = httpx.get(url, timeout=5.0)
-            if response.status_code == 200:
-                data = response.json()
-                logger.info(f"Successfully retrieved ESG report for {ticker_upper}")
-                report = ESGAnalysisReport.model_validate(data)
-            else:
-                logger.warning(f"ESG Analyst API returned status code {response.status_code}. Using fallback mock data.")
+            logger.info(f"Invoking local ESGAgent for ticker: {ticker_upper}")
+            agent = ESGAgent()
+            data = agent.analyze_ticker(ticker_upper)
+            report = ESGAnalysisReport.model_validate(data)
+            logger.info(f"Successfully ran local ESG analysis for {ticker_upper}")
         except Exception as e:
-            logger.warning(f"Failed to connect to ESG Analyst API ({str(e)}). Using fallback mock data.")
+            logger.warning(f"Failed to run local ESG Analyst Agent ({str(e)}). Using fallback mock data.")
 
         if not report:
             fallback_data = MOCK_REPORTS.get(ticker_upper)
@@ -327,13 +324,13 @@ class ESGClient:
             try:
                 from backend.services.state_manager import state_manager
                 # Calculate confidence score (0.0 to 1.0) based on sincerity
-                sincerity = report.audio_credibility.sincerity_score
+                sincerity = report.audio_credibility.sincerity_score if report.audio_credibility else 0.0
                 confidence = max(0.90, sincerity / 100.0) if report.status == "APPROVED" else (sincerity / 100.0 if sincerity > 0 else 0.85)
                 
                 uncertainty_factors = []
-                if report.document_audit.alignment_rating == "Low":
+                if report.document_audit and report.document_audit.alignment_rating == "Low":
                     uncertainty_factors.append("Low Document Alignment Rating")
-                if report.audio_credibility.evasion_score > 30:
+                if report.audio_credibility and report.audio_credibility.evasion_score > 30:
                     uncertainty_factors.append("High Executive Evasion Score")
                 
                 state_manager.update_esg(
